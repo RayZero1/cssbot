@@ -1,8 +1,13 @@
 import discord
 from discord.ext import commands
 import config
+from services.utils import ensure_state_file
 
 from cogs.tickets import TicketEntryView, TranscriptActionView
+
+if __name__ == "__main__":
+    ensure_state_file()
+    asyncio.run(main())
 
 intents = discord.Intents.default()
 intents.guilds = True
