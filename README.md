@@ -93,7 +93,8 @@ CSSBOT/
 │
 ├── services/
 │   ├── __init__.py
-│   └── icai_scraper.py
+│   ├── icai_scraper.py
+│   └── utils.py
 │
 ├── data/
 │   ├── state.json
