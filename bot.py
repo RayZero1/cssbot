@@ -3,7 +3,7 @@ from discord.ext import commands
 import asyncio
 import config
 
-from services.utils import ensure_state_file, ensure_tickets_file
+from services.utils import ensure_state_file
 from cogs.tickets import TicketEntryView, TranscriptActionView
 
 # -----------------------
@@ -77,5 +77,4 @@ async def setup_hook():
 # -----------------------
 if __name__ == "__main__":
     ensure_state_file()
-    ensure_tickets_file()
     bot.run(config.DISCORD_TOKEN)
