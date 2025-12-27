@@ -101,7 +101,7 @@ CSSBOT/
 │
 ├── logs/
 ├── venv/
-
+```
 ## ⚙️ Setup Instructions
 
 ### 1️⃣ Clone the repository
