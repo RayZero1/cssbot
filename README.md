@@ -78,6 +78,7 @@ It combines moderation workflows, study group automation, announcement embeds, a
 
 ## 🏗️ Project Structure
 
+```markdown
 CSSBOT/
 ├── bot.py
 ├── config.py
@@ -100,6 +101,7 @@ CSSBOT/
 │
 ├── logs/
 ├── venv/
+```
 
 ## ⚙️ Setup Instructions
 
