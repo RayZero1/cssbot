@@ -101,7 +101,6 @@ CSSBOT/
 │
 ├── logs/
 ├── venv/
-```
 
 ## ⚙️ Setup Instructions
 
