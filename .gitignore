@@ -1,0 +1,32 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+pyvenv.cfg
+
+# =========================
+# Environment / Secrets
+# =========================
+.env
+config.py
+
+# =========================
+# Runtime data
+# =========================
+data/tickets.json
+data/state.json
+logs/
+
+# =========================
+# OS / Editor
+# =========================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
