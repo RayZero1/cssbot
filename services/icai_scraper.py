@@ -33,12 +33,13 @@ def fetch_todays_announcements():
                 parts = raw_date.split(",")
                 date_part = f"{parts[0].strip()}, {parts[1].strip()}"
                 ann_date = datetime.strptime(date_part, "%d %B, %Y").date()
+                print(ann_date)
+                print(today - timedelta(days=1))
             except Exception:
                 continue
 
             if ann_date != today - timedelta(days=1):
                 continue
-            
             elif ann_date != today:
                 continue
 
