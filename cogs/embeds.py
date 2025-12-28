@@ -3,76 +3,114 @@ from discord.ext import commands, tasks
 from discord import app_commands
 from datetime import datetime
 import json
-import config
-from services.icai_scraper import fetch_todays_announcements
 import os
+import config
 
-ANNOUNCEMENT_CHANNEL_ID = int(os.getenv("ANNOUNCEMENT_CHANNEL_ID", "0"))
+from services.icai_scraper import fetch_todays_announcements
+
+
+# -----------------------
+# State helpers
+# -----------------------
+STATE_FILE = "data/state.json"
 
 
 def load_state():
-    with open(config.STATE_FILE, "r", encoding="utf-8") as f:
+    with open(STATE_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def save_state(state):
-    with open(config.STATE_FILE, "w", encoding="utf-8") as f:
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
 
 
+# -----------------------
+# Announcement Modal
+# -----------------------
+class AnnounceModal(discord.ui.Modal, title="New Announcement"):
+    ann_title = discord.ui.TextInput(
+        label="Title",
+        placeholder="CA Final – Important Update",
+        max_length=256,
+        required=True
+    )
+
+    ann_body = discord.ui.TextInput(
+        label="Announcement Text",
+        style=discord.TextStyle.paragraph,
+        placeholder="Write your announcement here.\nNew lines are allowed.",
+        max_length=2000,
+        required=True
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            title=self.ann_title.value,
+            description=self.ann_body.value,
+            color=0x2B6CB0,
+            timestamp=datetime.utcnow()
+        )
+        embed.set_footer(text="CA Study Space")
+
+        msg = await interaction.channel.send(embed=embed)
+
+        await interaction.response.send_message(
+            "📎 **Optional:** Upload an image now to attach it to this announcement.\n"
+            "You can ignore this message if not needed.",
+            ephemeral=True
+        )
+
+        # Wait for image upload from the same user
+        def check(m):
+            return (
+                m.author == interaction.user
+                and m.channel == interaction.channel
+                and m.attachments
+            )
+
+        try:
+            image_msg = await interaction.client.wait_for(
+                "message",
+                timeout=120,
+                check=check
+            )
+        except TimeoutError:
+            return
+
+        attachment = image_msg.attachments[0]
+        embed.set_image(url=attachment.url)
+        await msg.edit(embed=embed)
+
+
+# -----------------------
+# Embeds Cog
+# -----------------------
 class Embeds(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-    
+
+    # ---------- READY ----------
     @commands.Cog.listener()
     async def on_ready(self):
         if not self.icai_check.is_running():
             self.icai_check.start()
             print("[CSSBot] Embeds & ICAI automation loaded")
 
-    # ---------- MANUAL ANNOUNCE (WITH IMAGE) ----------
+    # ---------- ANNOUNCE ----------
+    @app_commands.command(
+        name="announce",
+        description="Post a formatted announcement"
+    )
+    @app_commands.checks.has_permissions(manage_messages=True)
+    async def announce(self, interaction: discord.Interaction):
+        # No arguments, modal opens immediately
+        await interaction.response.send_modal(AnnounceModal())
 
-    @app_commands.command(name="announce", description="Post a clean embedded announcement")
-    async def announce(
-        self,
-        interaction: discord.Interaction,
-        title: str,
-        message: str,
-        link: str = None,
-        image: discord.Attachment = None
-    ):
-        if not interaction.user.guild_permissions.manage_messages:
-            await interaction.response.send_message(
-                "You don’t have permission to use this command.",
-                ephemeral=True
-            )
-            return
-
-        embed = discord.Embed(
-            title=title,
-            description=message,
-            color=0x2B6CB0,
-            timestamp=datetime.utcnow()
-        )
-
-        if link:
-            embed.url = link
-
-        if image:
-            embed.set_image(url=image.url)
-
-        embed.set_footer(text="CA Study Space")
-
-        await interaction.response.send_message(embed=embed)
-    
     # ---------- ICAI AUTOMATION ----------
     @tasks.loop(minutes=120)
     async def icai_check(self):
-        print("[CSSBot] ICAI Checking for new announcements...")
-        if ANNOUNCEMENT_CHANNEL_ID == 0:
-            return
-
-        channel = self.bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
+        channel = self.bot.get_channel(config.ICAI_ANNOUNCEMENT_CHANNEL_ID)
         if not channel:
             return
 
@@ -92,12 +130,10 @@ class Embeds(commands.Cog):
                 color=0x2B6CB0,
                 timestamp=datetime.utcnow()
             )
-
             embed.add_field(name="Date", value=ann["date"], inline=False)
             embed.set_footer(text="Source: ICAI BOS Portal")
 
             await channel.send(embed=embed)
-
             posted.add(ann["id"])
 
         state["posted_announcements"] = list(posted)
@@ -105,18 +141,11 @@ class Embeds(commands.Cog):
 
     @icai_check.before_loop
     async def before_icai_check(self):
-        print("[CSSBot] ICAI Waiting for bot to be ready...")
         await self.bot.wait_until_ready()
-        print("[CSSBot] ICAI Bot ready, starting task")
-
-    @commands.Cog.listener()
-    async def on_ready(self):
-        print("[CSSBot] Embeds & ICAI automation loaded")
-
-        if not self.icai_check.is_running():
-            self.icai_check.start()
-            print("[CSSBot] ICAI check task started")
 
 
+# -----------------------
+# Setup
+# -----------------------
 async def setup(bot):
     await bot.add_cog(Embeds(bot))

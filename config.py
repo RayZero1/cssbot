@@ -19,6 +19,7 @@ TICKETS_CATAGORY_NAME = "Tickets"
 # Variables for welcome and rules embeds
 WELCOME_CHANNEL_ID = int(os.getenv("WELCOME_CHANNEL_ID"))
 RULES_CHANNEL_ID = int(os.getenv("RULES_CHANNEL_ID"))
+ICAI_ANNOUNCEMENT_CHANNEL_ID = int(os.getenv("ANNOUNCEMENT_CHANNEL_ID"))
 
 # --- Paths ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

@@ -27,6 +27,10 @@ bot = commands.Bot(
 async def on_ready():
     print(f"[CSSBot] Logged in as {bot.user}")
 
+    # Sync commands
+    synced = await bot.tree.sync()
+    print(f"[CSSBot] Synced {len(synced)} commands")
+
     # Register persistent views
     bot.add_view(TicketEntryView())
     bot.add_view(TranscriptActionView("DUMMY"))
