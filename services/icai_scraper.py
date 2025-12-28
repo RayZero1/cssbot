@@ -17,7 +17,8 @@ def fetch_todays_announcements():
         announcements = soup.find_all("div", class_="ann_details")
 
         results = []
-        today = date.today()
+        start_date = date.today() - timedelta(days=7)
+        end_date = date.today()
 
         for ann in announcements:
             date_p = ann.find("p")
@@ -33,14 +34,10 @@ def fetch_todays_announcements():
                 parts = raw_date.split(",")
                 date_part = f"{parts[0].strip()}, {parts[1].strip()}"
                 ann_date = datetime.strptime(date_part, "%d %B, %Y").date()
-                print(ann_date)
-                print(today - timedelta(days=1))
             except Exception:
                 continue
-
-            if ann_date != today - timedelta(days=1):
-                continue
-            elif ann_date != today:
+            
+            if ann_date < start_date or ann_date > end_date:
                 continue
 
             results.append({
