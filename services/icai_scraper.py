@@ -1,6 +1,6 @@
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 ICAI_URL = "https://boslive.icai.org/examination_announcement.php"
 
@@ -36,7 +36,10 @@ def fetch_todays_announcements():
             except Exception:
                 continue
 
-            if ann_date != today:
+            if ann_date != today - timedelta(days=1):
+                continue
+            
+            elif ann_date != today:
                 continue
 
             results.append({
