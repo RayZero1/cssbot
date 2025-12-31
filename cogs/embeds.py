@@ -26,6 +26,103 @@ def save_state(state):
 
 
 # -----------------------
+# Image Attachment View
+# -----------------------
+class ImageAttachmentView(discord.ui.View):
+    def __init__(self, embed, message):
+        super().__init__(timeout=180)
+        self.embed = embed
+        self.message = message
+        self.interaction_user = None
+
+    @discord.ui.button(
+        label="Attach Image",
+        style=discord.ButtonStyle.primary,
+        emoji="🖼️"
+    )
+    async def attach_image(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.interaction_user = interaction.user
+        await interaction.response.send_message(
+            "📎 **Upload your image now** (you have 2 minutes)\n"
+            "Send the image as a message in this channel.",
+            ephemeral=True
+        )
+
+        # Wait for image upload
+        def check(m):
+            return (
+                m.author == interaction.user
+                and m.channel == interaction.channel
+                and m.attachments
+            )
+
+        try:
+            image_msg = await interaction.client.wait_for(
+                "message",
+                timeout=120,
+                check=check
+            )
+
+            attachment = image_msg.attachments[0]
+            
+            # Check if it's an image
+            if not attachment.content_type or not attachment.content_type.startswith('image/'):
+                await interaction.followup.send(
+                    "❌ Please upload an image file (PNG, JPG, GIF, etc.)",
+                    ephemeral=True
+                )
+                return
+
+            self.embed.set_image(url=attachment.url)
+            await self.message.edit(embed=self.embed, view=None)
+            
+            # Delete the user's image message for cleanliness
+            try:
+                await image_msg.delete()
+            except:
+                pass
+
+            await interaction.followup.send(
+                "✅ Image attached successfully!",
+                ephemeral=True
+            )
+
+            # Disable all buttons after successful attachment
+            for item in self.children:
+                item.disabled = True
+            await self.message.edit(view=self)
+
+        except TimeoutError:
+            await interaction.followup.send(
+                "⏱️ Timeout! Image was not attached.",
+                ephemeral=True
+            )
+
+    @discord.ui.button(
+        label="Skip Image",
+        style=discord.ButtonStyle.secondary,
+        emoji="➡️"
+    )
+    async def skip_image(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "✅ Announcement posted without image.",
+            ephemeral=True
+        )
+        # Remove the view
+        await self.message.edit(view=None)
+        self.stop()
+
+    async def on_timeout(self):
+        # Clean up buttons after timeout
+        for item in self.children:
+            item.disabled = True
+        try:
+            await self.message.edit(view=self)
+        except:
+            pass
+
+
+# -----------------------
 # Announcement Modal
 # -----------------------
 class AnnounceModal(discord.ui.Modal, title="New Announcement"):
@@ -44,43 +141,105 @@ class AnnounceModal(discord.ui.Modal, title="New Announcement"):
         required=True
     )
 
+    ann_color = discord.ui.TextInput(
+        label="Color (optional)",
+        placeholder="Hex color code (e.g., 2B6CB0) or leave empty for default blue",
+        max_length=6,
+        required=False
+    )
+
     async def on_submit(self, interaction: discord.Interaction):
+        # Parse color
+        color = 0x2B6CB0  # Default blue
+        if self.ann_color.value:
+            try:
+                color = int(self.ann_color.value.replace('#', ''), 16)
+            except ValueError:
+                color = 0x2B6CB0
+
         embed = discord.Embed(
             title=self.ann_title.value,
             description=self.ann_body.value,
-            color=0x2B6CB0,
+            color=color,
             timestamp=datetime.utcnow()
         )
         embed.set_footer(text="CA Study Space")
 
-        msg = await interaction.channel.send(embed=embed)
+        # Send the announcement with image attachment buttons
+        msg = await interaction.channel.send(
+            embed=embed,
+            view=ImageAttachmentView(embed, None)
+        )
+
+        # Update the view with the actual message reference
+        view = ImageAttachmentView(embed, msg)
+        await msg.edit(view=view)
 
         await interaction.response.send_message(
-            "📎 **Optional:** Upload an image now to attach it to this announcement.\n"
-            "You can ignore this message if not needed.",
+            "✅ Announcement posted! Use the buttons below the announcement to attach an image if needed.",
             ephemeral=True
         )
 
-        # Wait for image upload from the same user
-        def check(m):
-            return (
-                m.author == interaction.user
-                and m.channel == interaction.channel
-                and m.attachments
-            )
 
-        try:
-            image_msg = await interaction.client.wait_for(
-                "message",
-                timeout=120,
-                check=check
-            )
-        except TimeoutError:
-            return
+# -----------------------
+# Alternative: Slash Command with Image Parameter
+# -----------------------
+class AnnounceWithImageModal(discord.ui.Modal, title="Announcement with Image"):
+    ann_title = discord.ui.TextInput(
+        label="Title",
+        placeholder="CA Final – Important Update",
+        max_length=256,
+        required=True
+    )
 
-        attachment = image_msg.attachments[0]
-        embed.set_image(url=attachment.url)
-        await msg.edit(embed=embed)
+    ann_body = discord.ui.TextInput(
+        label="Announcement Text",
+        style=discord.TextStyle.paragraph,
+        placeholder="Write your announcement here.\nNew lines are allowed.",
+        max_length=2000,
+        required=True
+    )
+
+    ann_color = discord.ui.TextInput(
+        label="Color (optional)",
+        placeholder="Hex color code (e.g., 2B6CB0)",
+        max_length=6,
+        required=False
+    )
+
+    image_url = discord.ui.TextInput(
+        label="Image URL (optional)",
+        placeholder="https://example.com/image.png",
+        max_length=500,
+        required=False
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # Parse color
+        color = 0x2B6CB0
+        if self.ann_color.value:
+            try:
+                color = int(self.ann_color.value.replace('#', ''), 16)
+            except ValueError:
+                color = 0x2B6CB0
+
+        embed = discord.Embed(
+            title=self.ann_title.value,
+            description=self.ann_body.value,
+            color=color,
+            timestamp=datetime.utcnow()
+        )
+        embed.set_footer(text="CA Study Space")
+
+        # Add image if URL provided
+        if self.image_url.value:
+            embed.set_image(url=self.image_url.value)
+
+        await interaction.channel.send(embed=embed)
+        await interaction.response.send_message(
+            "✅ Announcement posted successfully!",
+            ephemeral=True
+        )
 
 
 # -----------------------
@@ -97,15 +256,23 @@ class Embeds(commands.Cog):
             self.icai_check.start()
             print("[CSSBot] Embeds & ICAI automation loaded")
 
-    # ---------- ANNOUNCE ----------
+    # ---------- ANNOUNCE (with button-based image attachment) ----------
     @app_commands.command(
         name="announce",
-        description="Post a formatted announcement"
+        description="Post a formatted announcement with optional image"
     )
     @app_commands.checks.has_permissions(manage_messages=True)
     async def announce(self, interaction: discord.Interaction):
-        # No arguments, modal opens immediately
         await interaction.response.send_modal(AnnounceModal())
+
+    # ---------- ANNOUNCE WITH URL (alternative method) ----------
+    @app_commands.command(
+        name="announce_url",
+        description="Post announcement with image URL directly"
+    )
+    @app_commands.checks.has_permissions(manage_messages=True)
+    async def announce_url(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(AnnounceWithImageModal())
 
     # ---------- ICAI AUTOMATION ----------
     @tasks.loop(minutes=120)
