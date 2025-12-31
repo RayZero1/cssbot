@@ -277,15 +277,18 @@ class Tickets(commands.Cog):
 
             if payload.user_id not in ticket["members"]:
                 return
-            if payload.user_id in ticket["approved_members"]:
+            if payload.user_id in ticket.get("approved_members", []):
                 return
 
+            if "approved_members" not in ticket:
+                ticket["approved_members"] = []
+
             ticket["approved_members"].append(payload.user_id)
-            save_ticket(self.ticket_id, ticket)
+            save_ticket(ticket_id, ticket)
 
             if set(ticket["approved_members"]) == set(ticket["members"]):
                 await self.finalize_ticket(payload.guild_id, ticket_id)
-
+            
             return
 
     async def finalize_ticket(self, guild_id, ticket_id):
