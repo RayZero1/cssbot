@@ -126,7 +126,7 @@ async def create_ticket_channel(guild, ticket_id, ticket, admin):
     return channel, consent.id
 
 # =================================================
-# Transcript action (Claim)
+# Transcript action (Claim + Cancel)
 # =================================================
 
 class TranscriptActionView(discord.ui.View):
@@ -175,6 +175,62 @@ class TranscriptActionView(discord.ui.View):
 
         await interaction.followup.send(
             f"✅ Ticket claimed. Channel created: {channel.mention}",
+            ephemeral=True
+        )
+
+    @discord.ui.button(
+        label="Cancel",
+        style=discord.ButtonStyle.danger,
+        emoji="❌",
+        custom_id="cssbot_cancel_ticket"
+    )
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.followup.send("❌ Admins only.", ephemeral=True)
+            return
+
+        data = load_data()
+        ticket = data["tickets"].get(self.ticket_id)
+
+        if not ticket:
+            await interaction.followup.send("⚠️ Ticket not found.", ephemeral=True)
+            return
+
+        if ticket["status"] in ["CANCELLED", "APPROVED"]:
+            await interaction.followup.send(
+                f"⚠️ Cannot cancel a ticket that is already {ticket['status']}.",
+                ephemeral=True
+            )
+            return
+
+        # Update ticket status
+        ticket["status"] = "CANCELLED"
+        ticket["cancelled_by"] = interaction.user.id
+        ticket["cancelled_at"] = datetime.utcnow().isoformat()
+
+        # If there's an active ticket channel, delete it
+        if ticket["status"] == "CLAIMED" and ticket.get("approval_message_id"):
+            guild = interaction.guild
+            channel = discord.utils.get(guild.text_channels, name=f"ticket-{self.ticket_id}")
+            if channel:
+                try:
+                    await channel.delete(reason=f"Ticket {self.ticket_id} cancelled by admin")
+                except discord.NotFound:
+                    pass
+
+        save_data(data)
+
+        await update_transcript(
+            interaction.client,
+            self.ticket_id,
+            ticket,
+            f"🔴 CANCELLED by <@{interaction.user.id}>"
+        )
+
+        await interaction.followup.send(
+            f"✅ Ticket #{self.ticket_id} has been cancelled.",
             ephemeral=True
         )
 
@@ -391,6 +447,8 @@ class StudyGroupFormView(discord.ui.View):
             "created_by": self.creator.id,
             "status": "OPEN",
             "claimed_by": None,
+            "cancelled_by": None,
+            "cancelled_at": None,
             "approval_message_id": None,
             "approved_members": [],
             "transcript_message_id": None
@@ -413,7 +471,7 @@ class StudyGroupFormView(discord.ui.View):
         )
 
 # =================================================
-# Select menus (3–5 enforced)
+# Select menus (2–5 enforced)
 # =================================================
 
 class MemberCountSelect(discord.ui.Select):

@@ -41,13 +41,15 @@ async def on_ready():
     await ensure_embed_posted_once(
         bot,
         config.WELCOME_CHANNEL_ID,
-        get_welcome_embed()
+        get_welcome_embed(),
+        "assets/ca_welcome.png"
     )
 
     await ensure_embed_posted_once(
         bot,
         config.RULES_CHANNEL_ID,
-        get_rules_embed()
+        get_rules_embed(),
+        "assets/ca_rules.png"
     )
 
 # -----------------------
@@ -88,7 +90,8 @@ async def ensure_ticket_entry_message(bot):
 async def ensure_embed_posted_once(
     bot: commands.Bot,
     channel_id: int,
-    embed: discord.Embed
+    embed: discord.Embed,
+    image_path: str = None
 ):
     channel = bot.get_channel(channel_id)
     if not channel:
@@ -103,23 +106,46 @@ async def ensure_embed_posted_once(
         ):
             return  # Message already exists
 
-    await channel.send(embed=embed)
+    # Prepare file if image path is provided
+    file = None
+    if image_path:
+        try:
+            file = discord.File(image_path, filename=image_path.split('/')[-1])
+            embed.set_image(url=f"attachment://{image_path.split('/')[-1]}")
+        except FileNotFoundError:
+            print(f"[CSSBot] Warning: Image not found at {image_path}")
+
+    if file:
+        await channel.send(embed=embed, file=file)
+    else:
+        await channel.send(embed=embed)
+    
     print(f"[CSSBot] Posted: {embed.title}")
 
 def get_welcome_embed():
     return discord.Embed(
         title="👋 Welcome to CA Study Space",
         description=(
-            "This is an unofficial, invite-only study space for CA students.\n"
-            "The goal is simple: **clear thinking, disciplined discussion, and shared effort.**\n\n"
+            "Welcome to **CA Study Space** — an unofficial, invite-only community built for CA students who value "
+            "**clarity over chaos, and progress over panic.**\n\n"
 
-            "This server is **not a replacement** for classes or self-study.\n"
-            "It exists to ask precise doubts, discuss concepts, and learn from each other’s mistakes.\n\n"
+            "This isn't a substitute for your coaching classes or self-study. "
+            "It's a space to **ask sharp questions, discuss complex concepts, and learn from each other's journey** through one of India's toughest professional courses.\n\n"
 
-            "Please take a moment to read the **rules-and-culture** channel.\n\n"
+            "### What We're About\n"
+            "- 📚 Solving precise doubts — one concept at a time\n"
+            "- 🤝 Collaborative study groups with structured workflows\n"
+            "- 💬 Respectful discussions that challenge ideas, not people\n"
+            "- ☕ A culture that values focus, discipline, and the occasional chai break\n\n"
 
-            "Keep your doubts sharp, your discussions respectful,\n"
-            "and your chai strong."
+            "### Before You Start\n"
+            "Please read the <#1453101004244385945> channel carefully. "
+            "It's short, to the point, and explains how we maintain the quality of this space.\n\n"
+
+            "We already carry enough stress in our CA journey. "
+            "This server exists to reduce it — not add to it.\n\n"
+
+            "**Keep your doubts sharp, your discussions respectful, and your chai strong.** ☕"
         ),
         color=0x2B6CB0
     )
@@ -128,29 +154,43 @@ def get_rules_embed():
     return discord.Embed(
         title="📜 Rules & Culture",
         description=(
-            "**1. Ask precise doubts**\n"
-            "One concept at a time. Show what you’ve tried. Panic posts help no one.\n\n"
+            "This server thrives on **structure, respect, and shared accountability.** "
+            "These rules exist to protect the quality of discussion and keep the space productive.\n\n"
 
-            "**2. Use the forum properly**\n"
-            "Conceptual and subject-level doubts go in the forum. Quick clarifications go in the quick-clarification channel.\n\n"
+            "### Core Rules\n\n"
 
-            "**3. No shortcuts, no selling**\n"
-            "No course promotion, piracy, or exam hacks. We do the work properly here.\n\n"
+            "**1. Ask Precise Doubts**\n"
+            "State one concept at a time. Show what you've already tried. Panic posts and vague questions waste everyone's time — including yours.\n\n"
 
-            "**4. Respect time and effort**\n"
-            "Help when you can. Disagree calmly. Correct without condescension.\n\n"
+            "**2. Use Channels Properly**\n"
+            "- **Forum threads:** Subject-level or conceptual doubts\n"
+            "- **Quick-clarification:** Short questions that need fast answers\n"
+            "- **Study groups:** Use the ticket system for structured collaboration\n\n"
 
-            "**5. Keep it academic**\n"
-            "No politics, drama, or negativity spirals. Chill chats stay in the chai-break channel.\n\n"
+            "**3. No Shortcuts, No Selling**\n"
+            "No course promotions. No piracy. No exam hacks or unethical workarounds. We do the work properly here.\n\n"
 
-            "**6. Notes are guidance, not substitutes**\n"
-            "Shared resources support study — they don’t replace it.\n\n"
+            "**4. Respect Time and Effort**\n"
+            "Help when you can. Disagree calmly. Correct mistakes without condescension. Everyone here is learning.\n\n"
 
-            "**7. Quiet but firm moderation**\n"
-            "Repeated noise or misinformation may lead to removal.\n\n"
+            "**5. Keep It Academic**\n"
+            "No politics. No drama. No negativity spirals. Off-topic chats belong in **☕ chai-break** — nowhere else.\n\n"
 
-            "This space is meant to be calm, focused, and supportive.\n"
-            "We already have enough panic in our CA journey — let’s not add to it."
+            "**6. Notes Are Guidance, Not Substitutes**\n"
+            "Shared resources support study — they don't replace the hard work of understanding concepts yourself.\n\n"
+
+            "**7. Quiet But Firm Moderation**\n"
+            "Admins won't micromanage, but repeated noise, misinformation, or rule violations will lead to removal.\n\n"
+
+            "---\n\n"
+
+            "### Culture Statement\n"
+            "This space is built on one belief:\n\n"
+            "> *\"Structure should reduce stress, not create it.\"*\n\n"
+
+            "We already face enough pressure in CA. Let's not bring unnecessary chaos here.\n\n"
+
+            "**Stay calm. Stay focused. Stay accountable.**"
         ),
         color=0x805AD5
     )

@@ -9,7 +9,7 @@ DEFAULT_STATE = {
 }
 
 DEFAULT_TICKETS = {
-    "last_ticket_id": 1,
+    "last_ticket_id": 0,
     "tickets": {},
 }
 
