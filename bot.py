@@ -5,6 +5,7 @@ import config
 
 from services.utils import ensure_state_file
 from cogs.tickets import TicketEntryView, TranscriptActionView
+from services.database import init_db
 
 # -----------------------
 # Intents
@@ -208,4 +209,5 @@ async def setup_hook():
 # -----------------------
 if __name__ == "__main__":
     ensure_state_file()
+    init_db()
     bot.run(config.DISCORD_TOKEN)

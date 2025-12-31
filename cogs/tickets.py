@@ -2,25 +2,24 @@ import discord
 from discord.ext import commands
 import json
 from datetime import datetime
+import io
 import config
+from discord import app_commands
 
 DATA_FILE = "data/tickets.json"
+
+from services.database import (
+    get_ticket,
+    get_all_tickets,
+    save_ticket,
+    next_ticket_id,
+    export_tickets_json,
+)
 
 # =================================================
 # Data helpers
 # =================================================
 
-def load_data():
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def save_data(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-
-def next_ticket_id(data):
-    data["last_ticket_id"] += 1
-    return f"{data['last_ticket_id']:02d}"
 
 # =================================================
 # Transcript helpers
@@ -147,8 +146,7 @@ class TranscriptActionView(discord.ui.View):
             await interaction.followup.send("❌ Admins only.", ephemeral=True)
             return
 
-        data = load_data()
-        ticket = data["tickets"].get(self.ticket_id)
+        ticket = get_ticket(self.ticket_id)
 
         if not ticket or ticket["status"] != "OPEN":
             await interaction.followup.send("⚠️ Ticket unavailable.", ephemeral=True)
@@ -164,7 +162,7 @@ class TranscriptActionView(discord.ui.View):
         ticket["approval_message_id"] = approval_msg_id
         ticket["approved_members"] = []
 
-        save_data(data)
+        save_ticket(self.ticket_id, ticket)
 
         await update_transcript(
             interaction.client,
@@ -191,8 +189,7 @@ class TranscriptActionView(discord.ui.View):
             await interaction.followup.send("❌ Admins only.", ephemeral=True)
             return
 
-        data = load_data()
-        ticket = data["tickets"].get(self.ticket_id)
+        ticket = get_ticket(self.ticket_id)
 
         if not ticket:
             await interaction.followup.send("⚠️ Ticket not found.", ephemeral=True)
@@ -220,7 +217,7 @@ class TranscriptActionView(discord.ui.View):
                 except discord.NotFound:
                     pass
 
-        save_data(data)
+        save_ticket(self.ticket_id, ticket)
 
         await update_transcript(
             interaction.client,
@@ -242,6 +239,27 @@ class Tickets(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+class Tickets(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    @app_commands.command(
+        name="export_tickets",
+        description="Export all study group tickets as JSON for audit"
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def export_tickets(self, interaction: discord.Interaction):
+        json_data = export_tickets_json()
+
+        fp = io.StringIO(json_data)
+        file = discord.File(fp, filename=f"tickets_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json")
+
+        await interaction.response.send_message(
+            content="📊 Ticket data export:",
+            file=file,
+            ephemeral=True
+        )
+
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload):
         if payload.emoji.name != "✅":
@@ -249,9 +267,11 @@ class Tickets(commands.Cog):
         if payload.user_id == self.bot.user.id:
             return
 
-        data = load_data()
+        # Get all tickets
+        all_tickets = get_all_tickets()
 
-        for ticket_id, ticket in data["tickets"].items():
+        #  Find ticket with matching approval message
+        for ticket_id, ticket in all_tickets.items():
             if ticket.get("approval_message_id") != payload.message_id:
                 continue
 
@@ -261,7 +281,7 @@ class Tickets(commands.Cog):
                 return
 
             ticket["approved_members"].append(payload.user_id)
-            save_data(data)
+            save_ticket(self.ticket_id, ticket)
 
             if set(ticket["approved_members"]) == set(ticket["members"]):
                 await self.finalize_ticket(payload.guild_id, ticket_id)
@@ -269,14 +289,15 @@ class Tickets(commands.Cog):
             return
 
     async def finalize_ticket(self, guild_id, ticket_id):
-        data = load_data()
-        ticket = data["tickets"].get(ticket_id)
+        ticket = get_ticket(ticket_id)
         if not ticket:
             return
 
         ticket["status"] = "APPROVED"
         ticket["approved_members"] = []
         ticket["approval_message_id"] = None
+
+        save_ticket(ticket_id, ticket)
 
         await update_transcript(
             self.bot,
@@ -291,16 +312,14 @@ class Tickets(commands.Cog):
             if channel:
                 await channel.delete(reason="Study group approved")
 
-        # Create role and voice channel
-        role = await create_study_role(guild, ticket)
+            # Create role and voice channel
+            role = await create_study_role(guild, ticket)
 
-        # Assign role to members
-        await assign_role_to_members(guild, role, ticket["members"])
+            # Assign role to members
+            await assign_role_to_members(guild, role, ticket["members"])
 
-        # Create private voice channel
-        await create_private_voice_channel(guild, role, ticket)
-
-        save_data(data)
+            # Create private voice channel
+            await create_private_voice_channel(guild, role, ticket)
 
 # =================================================
 # Role and voice channel creation
@@ -436,8 +455,7 @@ class StudyGroupFormView(discord.ui.View):
             await interaction.response.send_message("❌ Invalid submission.", ephemeral=True)
             return
 
-        data = load_data()
-        tid = next_ticket_id(data)
+        tid = next_ticket_id()
 
         ticket = {
             "group_name": self.group_name,
@@ -451,15 +469,14 @@ class StudyGroupFormView(discord.ui.View):
             "cancelled_at": None,
             "approval_message_id": None,
             "approved_members": [],
-            "transcript_message_id": None
+            "transcript_message_id": None,
         }
 
         ticket["transcript_message_id"] = await post_transcript(
             interaction.client, tid, ticket
         )
 
-        data["tickets"][tid] = ticket
-        save_data(data)
+        save_ticket(tid, ticket)
 
         await interaction.response.edit_message(
             embed=discord.Embed(
