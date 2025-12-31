@@ -122,7 +122,9 @@ async def create_ticket_channel(guild, ticket_id, ticket, admin):
     )
     await consent.add_reaction("✅")
 
-    return channel, consent.id
+    print(f"[Tickets] Created consent message with ID: {consent.id}")  # Debug log
+    
+    return channel, str(consent.id)  # ← Return as STRING
 
 # =================================================
 # Transcript action (Claim + Cancel)
@@ -134,11 +136,11 @@ class TranscriptActionView(discord.ui.View):
         self.ticket_id = ticket_id
 
     @discord.ui.button(
-        label="Claim",
-        style=discord.ButtonStyle.primary,
-        emoji="🛠️",
-        custom_id="cssbot_claim_ticket"
-    )
+    label="Claim",
+    style=discord.ButtonStyle.primary,
+    emoji="🛠️",
+    custom_id="cssbot_claim_ticket"
+)
     async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
 
@@ -159,10 +161,15 @@ class TranscriptActionView(discord.ui.View):
             interaction.guild, self.ticket_id, ticket, interaction.user
         )
 
-        ticket["approval_message_id"] = approval_msg_id
+        ticket["approval_message_id"] = approval_msg_id  # Already a string from create_ticket_channel
         ticket["approved_members"] = []
 
+        # SAVE IMMEDIATELY after setting approval_message_id
         save_ticket(self.ticket_id, ticket)
+        
+        print(f"[Tickets] Ticket {self.ticket_id} claimed by {interaction.user.id}")
+        print(f"[Tickets] Approval message ID saved: {approval_msg_id}")
+        print(f"[Tickets] Ticket data after save: {get_ticket(self.ticket_id)}")  # Verify it saved
 
         await update_transcript(
             interaction.client,
@@ -267,29 +274,62 @@ class Tickets(commands.Cog):
         if payload.user_id == self.bot.user.id:
             return
 
-        # Get all tickets
-        all_tickets = get_all_tickets()
+        print(f"[Tickets] Reaction detected: User {payload.user_id} on message {payload.message_id}")
 
-        #  Find ticket with matching approval message
+        # Get all tickets from database
+        all_tickets = get_all_tickets()
+        
+        print(f"[Tickets] Total tickets in DB: {len(all_tickets)}")
+
+        # Find the ticket that matches this approval message
         for ticket_id, ticket in all_tickets.items():
-            if ticket.get("approval_message_id") != payload.message_id:
+            approval_msg_id = ticket.get("approval_message_id")
+            
+            print(f"[Tickets] Checking ticket {ticket_id}: approval_message_id = {approval_msg_id}, payload.message_id = {payload.message_id}")
+            
+            # Compare both as strings
+            if str(approval_msg_id) != str(payload.message_id):
                 continue
 
+            print(f"[Tickets] Match found! Ticket {ticket_id}")
+
+            # Check if user is in the ticket members
             if payload.user_id not in ticket["members"]:
+                print(f"[Tickets] User {payload.user_id} not in ticket members: {ticket['members']}")
                 return
-            if payload.user_id in ticket.get("approved_members", []):
+            
+            # Check if user already approved
+            current_approved = ticket.get("approved_members", [])
+            print(f"[Tickets] Current approved members: {current_approved}")
+            
+            if payload.user_id in current_approved:
+                print(f"[Tickets] User {payload.user_id} already approved")
                 return
 
+            # Add user to approved members
             if "approved_members" not in ticket:
                 ticket["approved_members"] = []
-
-            ticket["approved_members"].append(payload.user_id)
-            save_ticket(ticket_id, ticket)
-
-            if set(ticket["approved_members"]) == set(ticket["members"]):
-                await self.finalize_ticket(payload.guild_id, ticket_id)
             
+            ticket["approved_members"].append(payload.user_id)
+            
+            # SAVE to database
+            save_ticket(ticket_id, ticket)
+            
+            # Verify it was saved
+            saved_ticket = get_ticket(ticket_id)
+            print(f"[Tickets] After save - approved_members from DB: {saved_ticket.get('approved_members')}")
+
+            # Check if all members have approved
+            if set(ticket["approved_members"]) == set(ticket["members"]):
+                print(f"[Tickets] All members approved! Finalizing...")
+                await self.finalize_ticket(payload.guild_id, ticket_id)
+            else:
+                print(f"[Tickets] Waiting for more approvals: {len(ticket['approved_members'])}/{len(ticket['members'])}")
+
             return
+        
+        print(f"[Tickets] No matching ticket found for message {payload.message_id}")
+
 
     async def finalize_ticket(self, guild_id, ticket_id):
         ticket = get_ticket(ticket_id)
