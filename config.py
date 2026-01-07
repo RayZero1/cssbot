@@ -9,12 +9,17 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 # Optional: restrict to one server later
 GUILD_ID = os.getenv("GUILD_ID")  # string, cast later if used
 
-# Variables for ticketing system
+# Variables for SG ticketing system
 STUDY_GROUP_REQUEST_CHANNEL_ID = int(os.getenv("STUDY_GROUP_REQUEST_CHANNEL_ID"))
 TRANSCRIPTS_CHANNEL_ID = int(os.getenv("TRANSCRIPTS_CHANNEL_ID"))
 ADMIN_ROLE_ID = int(os.getenv("ADMIN_ROLE_ID"))
 STUDY_ROOM_CATEGORY_NAME = "Study Rooms"
 TICKETS_CATAGORY_NAME = "Tickets"
+
+# Variables for issues ticketing system
+ISSUE_TICKETS_CHANNEL_ID = int(os.getenv("ISSUE_TICKETS_CHANNEL_ID"))
+ISSUE_TRANSCRIPTS_CHANNEL_ID = int(os.getenv("ISSUE_TRANSCRIPTS_CHANNEL_ID"))
+MOD_ROLE_ID = int(os.getenv("MOD_ROLE_ID"))
 
 # Variables for welcome and rules embeds
 WELCOME_CHANNEL_ID = int(os.getenv("WELCOME_CHANNEL_ID"))

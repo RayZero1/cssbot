@@ -5,7 +5,8 @@ import config
 
 from services.utils import ensure_state_file
 from cogs.tickets import TicketEntryView, TranscriptActionView
-from services.database import init_db
+from cogs.issue_tickets import IssueTicketEntryView, IssueThreadActionsView, IssueTranscriptView
+from services.database import init_db, get_all_tickets, get_all_issue_tickets
 
 # -----------------------
 # Intents
@@ -34,7 +35,28 @@ async def on_ready():
 
     # Register persistent views
     bot.add_view(TicketEntryView())
-    bot.add_view(TranscriptActionView("DUMMY"))
+
+    try:
+        all_tickets = get_all_tickets()
+        if all_tickets and isinstance(all_tickets, dict):
+            for ticket_id, ticket in all_tickets.items():
+                if isinstance(ticket, dict) and ticket.get("status") in ["OPEN", "PENDING"]:
+                    bot.add_view(TranscriptActionView(ticket_id))
+                    print(f"[CSSBot] Registered view for ticket {ticket_id}")
+    except Exception as e:
+        print(f"[CSSBot] Error fetching tickets: {e}")
+
+    # Register persistent views for issue tickets
+    try:
+        all_issue_tickets = get_all_issue_tickets()
+        if all_issue_tickets and isinstance(all_issue_tickets, dict):
+            for ticket_id, ticket in all_issue_tickets.items():
+                if isinstance(ticket, dict) and ticket.get("status") not in ["RESOLVED", "INVALID"]:
+                    bot.add_view(IssueThreadActionsView(ticket_id))
+                    bot.add_view(IssueTranscriptView(ticket_id))
+                    print(f"[CSSBot] Registered view for issue ticket {ticket_id}")
+    except Exception as e:
+        print(f"[CSSBot] Error fetching issue tickets: {e}")
 
     await ensure_ticket_entry_message(bot)
 
@@ -203,6 +225,7 @@ def get_rules_embed():
 async def setup_hook():
     await bot.load_extension("cogs.embeds")
     await bot.load_extension("cogs.tickets")
+    await bot.load_extension("cogs.issue_tickets")
 
 # -----------------------
 # Boot

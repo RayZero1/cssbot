@@ -6,8 +6,6 @@ import io
 import config
 from discord import app_commands
 
-DATA_FILE = "data/tickets.json"
-
 from services.database import (
     get_ticket,
     get_all_tickets,
@@ -15,11 +13,6 @@ from services.database import (
     next_ticket_id,
     export_tickets_json,
 )
-
-# =================================================
-# Data helpers
-# =================================================
-
 
 # =================================================
 # Transcript helpers
@@ -50,17 +43,18 @@ async def post_transcript(bot, ticket_id, ticket):
         embed=embed,
         view=TranscriptActionView(ticket_id)
     )
-    return msg.id
+    return str(msg.id)
 
 
-async def update_transcript(bot, ticket_id, ticket, status_text):
+async def update_transcript(bot, ticket_id, ticket, status_text, reason=None):
+    """Update transcript with status and optional reason"""
     channel = bot.get_channel(config.TRANSCRIPTS_CHANNEL_ID)
     if not channel:
         return
 
     try:
-        msg = await channel.fetch_message(ticket["transcript_message_id"])
-    except discord.NotFound:
+        msg = await channel.fetch_message(int(ticket["transcript_message_id"]))
+    except (discord.NotFound, ValueError, TypeError):
         return
 
     embed = msg.embeds[0]
@@ -75,8 +69,48 @@ async def update_transcript(bot, ticket_id, ticket, status_text):
         inline=False
     )
     embed.add_field(name="Status", value=status_text, inline=True)
+    
+    # Add cancellation reason if provided
+    if reason:
+        embed.add_field(name="Reason", value=reason, inline=False)
 
     await msg.edit(embed=embed, view=None)
+    
+    # Return the embed for DM use
+    return embed
+
+
+async def send_transcript_dm(bot, user_id, ticket_id, ticket, status_text, reason=None):
+    """Send transcript to user via DM"""
+    try:
+        user = await bot.fetch_user(user_id)
+        
+        embed = discord.Embed(
+            title=f"🎫 Study Group Ticket #{ticket_id} - {status_text}",
+            color=0x2ECC71 if "APPROVED" in status_text else 0xE74C3C,
+            timestamp=datetime.utcnow()
+        )
+        
+        embed.add_field(name="Group Name", value=ticket["group_name"], inline=False)
+        embed.add_field(name="Level", value=ticket["level"], inline=True)
+        embed.add_field(name="Members", value=" ".join(f"<@{u}>" for u in ticket["members"]), inline=False)
+        embed.add_field(name="Final Status", value=status_text, inline=True)
+        
+        if reason:
+            embed.add_field(name="Reason", value=reason, inline=False)
+        
+        embed.set_footer(text="CA Study Space • Ticket System")
+        
+        await user.send(embed=embed)
+        print(f"[Tickets] Sent DM to user {user_id} for ticket {ticket_id}")
+        
+    except discord.Forbidden:
+        print(f"[Tickets] Could not DM user {user_id} - DMs disabled")
+    except discord.NotFound:
+        print(f"[Tickets] User {user_id} not found")
+    except Exception as e:
+        print(f"[Tickets] Error sending DM to {user_id}: {e}")
+
 
 # =================================================
 # Channel + consent creation
@@ -122,9 +156,81 @@ async def create_ticket_channel(guild, ticket_id, ticket, admin):
     )
     await consent.add_reaction("✅")
 
-    print(f"[Tickets] Created consent message with ID: {consent.id}")  # Debug log
+    print(f"[Tickets] Created consent message with ID: {consent.id}")
     
-    return channel, str(consent.id)  # ← Return as STRING
+    return channel, str(consent.id)
+
+
+# =================================================
+# Cancellation Reason Modal
+# =================================================
+
+class CancellationReasonModal(discord.ui.Modal, title="Ticket Cancellation"):
+    reason = discord.ui.TextInput(
+        label="Reason for Cancellation",
+        style=discord.TextStyle.paragraph,
+        placeholder="Please provide a clear reason for cancelling this ticket...",
+        required=True,
+        max_length=500
+    )
+
+    def __init__(self, ticket_id, bot):
+        super().__init__()
+        self.ticket_id = ticket_id
+        self.bot = bot
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        ticket = get_ticket(self.ticket_id)
+        if not ticket:
+            await interaction.followup.send("⚠️ Ticket not found.", ephemeral=True)
+            return
+
+        # Update ticket with cancellation details
+        ticket["status"] = "CANCELLED"
+        ticket["cancelled_by"] = interaction.user.id
+        ticket["cancelled_at"] = datetime.utcnow().isoformat()
+        ticket["cancellation_reason"] = self.reason.value
+
+        # Delete ticket channel if it exists
+        guild = interaction.guild
+        channel = discord.utils.get(guild.text_channels, name=f"ticket-{self.ticket_id}")
+        if channel:
+            try:
+                await channel.delete(reason=f"Ticket {self.ticket_id} cancelled by admin")
+            except discord.NotFound:
+                pass
+
+        # Save to database
+        save_ticket(self.ticket_id, ticket)
+
+        # Update transcript with reason
+        await update_transcript(
+            self.bot,
+            self.ticket_id,
+            ticket,
+            f"🔴 CANCELLED by <@{interaction.user.id}>",
+            reason=self.reason.value
+        )
+
+        # Send DM to ticket creator
+        await send_transcript_dm(
+            self.bot,
+            ticket["created_by"],
+            self.ticket_id,
+            ticket,
+            "CANCELLED",
+            reason=self.reason.value
+        )
+
+        await interaction.followup.send(
+            f"✅ Ticket #{self.ticket_id} has been cancelled.\n"
+            f"**Reason:** {self.reason.value}\n\n"
+            f"The ticket creator has been notified via DM.",
+            ephemeral=True
+        )
+
 
 # =================================================
 # Transcript action (Claim + Cancel)
@@ -136,23 +242,25 @@ class TranscriptActionView(discord.ui.View):
         self.ticket_id = ticket_id
 
     @discord.ui.button(
-    label="Claim",
-    style=discord.ButtonStyle.primary,
-    emoji="🛠️",
-    custom_id="cssbot_claim_ticket"
-)
+        label="Claim",
+        style=discord.ButtonStyle.primary,
+        emoji="🛠️",
+        custom_id="cssbot_claim_ticket"
+    )
     async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
-
+        # Check permissions first (before deferring)
         if not interaction.user.guild_permissions.administrator:
-            await interaction.followup.send("❌ Admins only.", ephemeral=True)
+            await interaction.response.send_message("❌ Admins only.", ephemeral=True)
             return
 
         ticket = get_ticket(self.ticket_id)
 
         if not ticket or ticket["status"] != "OPEN":
-            await interaction.followup.send("⚠️ Ticket unavailable.", ephemeral=True)
+            await interaction.response.send_message("⚠️ Ticket unavailable.", ephemeral=True)
             return
+
+        # NOW defer (we passed all checks)
+        await interaction.response.defer(ephemeral=True)
 
         ticket["status"] = "CLAIMED"
         ticket["claimed_by"] = interaction.user.id
@@ -161,15 +269,12 @@ class TranscriptActionView(discord.ui.View):
             interaction.guild, self.ticket_id, ticket, interaction.user
         )
 
-        ticket["approval_message_id"] = approval_msg_id  # Already a string from create_ticket_channel
+        ticket["approval_message_id"] = approval_msg_id
         ticket["approved_members"] = []
 
-        # SAVE IMMEDIATELY after setting approval_message_id
         save_ticket(self.ticket_id, ticket)
         
         print(f"[Tickets] Ticket {self.ticket_id} claimed by {interaction.user.id}")
-        print(f"[Tickets] Approval message ID saved: {approval_msg_id}")
-        print(f"[Tickets] Ticket data after save: {get_ticket(self.ticket_id)}")  # Verify it saved
 
         await update_transcript(
             interaction.client,
@@ -190,61 +295,31 @@ class TranscriptActionView(discord.ui.View):
         custom_id="cssbot_cancel_ticket"
     )
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
-
         if not interaction.user.guild_permissions.administrator:
-            await interaction.followup.send("❌ Admins only.", ephemeral=True)
+            await interaction.response.send_message("❌ Admins only.", ephemeral=True)
             return
 
         ticket = get_ticket(self.ticket_id)
 
         if not ticket:
-            await interaction.followup.send("⚠️ Ticket not found.", ephemeral=True)
+            await interaction.response.send_message("⚠️ Ticket not found.", ephemeral=True)
             return
 
         if ticket["status"] in ["CANCELLED", "APPROVED"]:
-            await interaction.followup.send(
+            await interaction.response.send_message(
                 f"⚠️ Cannot cancel a ticket that is already {ticket['status']}.",
                 ephemeral=True
             )
             return
 
-        # Update ticket status
-        ticket["status"] = "CANCELLED"
-        ticket["cancelled_by"] = interaction.user.id
-        ticket["cancelled_at"] = datetime.utcnow().isoformat()
-
-        # If there's an active ticket channel, delete it
-        if ticket["status"] == "CLAIMED" and ticket.get("approval_message_id"):
-            guild = interaction.guild
-            channel = discord.utils.get(guild.text_channels, name=f"ticket-{self.ticket_id}")
-            if channel:
-                try:
-                    await channel.delete(reason=f"Ticket {self.ticket_id} cancelled by admin")
-                except discord.NotFound:
-                    pass
-
-        save_ticket(self.ticket_id, ticket)
-
-        await update_transcript(
-            interaction.client,
-            self.ticket_id,
-            ticket,
-            f"🔴 CANCELLED by <@{interaction.user.id}>"
-        )
-
-        await interaction.followup.send(
-            f"✅ Ticket #{self.ticket_id} has been cancelled.",
-            ephemeral=True
+        # Show modal to get cancellation reason
+        await interaction.response.send_modal(
+            CancellationReasonModal(self.ticket_id, interaction.client)
         )
 
 # =================================================
 # Cog + reaction approval
 # =================================================
-
-class Tickets(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
 
 class Tickets(commands.Cog):
     def __init__(self, bot):
@@ -276,29 +351,24 @@ class Tickets(commands.Cog):
 
         print(f"[Tickets] Reaction detected: User {payload.user_id} on message {payload.message_id}")
 
-        # Get all tickets from database
         all_tickets = get_all_tickets()
         
         print(f"[Tickets] Total tickets in DB: {len(all_tickets)}")
 
-        # Find the ticket that matches this approval message
         for ticket_id, ticket in all_tickets.items():
             approval_msg_id = ticket.get("approval_message_id")
             
             print(f"[Tickets] Checking ticket {ticket_id}: approval_message_id = {approval_msg_id}, payload.message_id = {payload.message_id}")
             
-            # Compare both as strings
             if str(approval_msg_id) != str(payload.message_id):
                 continue
 
             print(f"[Tickets] Match found! Ticket {ticket_id}")
 
-            # Check if user is in the ticket members
             if payload.user_id not in ticket["members"]:
                 print(f"[Tickets] User {payload.user_id} not in ticket members: {ticket['members']}")
                 return
             
-            # Check if user already approved
             current_approved = ticket.get("approved_members", [])
             print(f"[Tickets] Current approved members: {current_approved}")
             
@@ -306,20 +376,16 @@ class Tickets(commands.Cog):
                 print(f"[Tickets] User {payload.user_id} already approved")
                 return
 
-            # Add user to approved members
             if "approved_members" not in ticket:
                 ticket["approved_members"] = []
             
             ticket["approved_members"].append(payload.user_id)
             
-            # SAVE to database
             save_ticket(ticket_id, ticket)
             
-            # Verify it was saved
             saved_ticket = get_ticket(ticket_id)
             print(f"[Tickets] After save - approved_members from DB: {saved_ticket.get('approved_members')}")
 
-            # Check if all members have approved
             if set(ticket["approved_members"]) == set(ticket["members"]):
                 print(f"[Tickets] All members approved! Finalizing...")
                 await self.finalize_ticket(payload.guild_id, ticket_id)
@@ -330,12 +396,14 @@ class Tickets(commands.Cog):
         
         print(f"[Tickets] No matching ticket found for message {payload.message_id}")
 
-
     async def finalize_ticket(self, guild_id, ticket_id):
         ticket = get_ticket(ticket_id)
         if not ticket:
+            print(f"[Tickets] Ticket {ticket_id} not found during finalization")
             return
 
+        print(f"[Tickets] Finalizing ticket {ticket_id}")
+        
         ticket["status"] = "APPROVED"
         ticket["approved_members"] = []
         ticket["approval_message_id"] = None
@@ -349,6 +417,15 @@ class Tickets(commands.Cog):
             "🟢 APPROVED"
         )
 
+        # Send DM to ticket creator
+        await send_transcript_dm(
+            self.bot,
+            ticket["created_by"],
+            ticket_id,
+            ticket,
+            "APPROVED"
+        )
+
         guild = self.bot.get_guild(guild_id)
         if guild:
             channel = discord.utils.get(guild.text_channels, name=f"ticket-{ticket_id}")
@@ -357,12 +434,11 @@ class Tickets(commands.Cog):
 
             # Create role and voice channel
             role = await create_study_role(guild, ticket)
-
-            # Assign role to members
             await assign_role_to_members(guild, role, ticket["members"])
-
-            # Create private voice channel
             await create_private_voice_channel(guild, role, ticket)
+        
+        print(f"[Tickets] Ticket {ticket_id} finalized successfully")
+
 
 # =================================================
 # Role and voice channel creation
@@ -371,7 +447,6 @@ class Tickets(commands.Cog):
 async def create_study_role(guild, ticket):
     role_name = f"SG_{ticket['group_name']}"
 
-    # Avoid duplicate roles
     existing = discord.utils.get(guild.roles, name=role_name)
     if existing:
         return existing
@@ -425,6 +500,7 @@ async def create_private_voice_channel(guild, role, ticket):
         reason="Study group approved"
     )
     return channel
+
 
 # =================================================
 # Ticket creation UI
@@ -510,6 +586,7 @@ class StudyGroupFormView(discord.ui.View):
             "claimed_by": None,
             "cancelled_by": None,
             "cancelled_at": None,
+            "cancellation_reason": None,
             "approval_message_id": None,
             "approved_members": [],
             "transcript_message_id": None,
@@ -529,6 +606,7 @@ class StudyGroupFormView(discord.ui.View):
             ),
             view=None
         )
+
 
 # =================================================
 # Select menus (2–5 enforced)
@@ -578,6 +656,7 @@ class MemberUserSelect(discord.ui.UserSelect):
         self.view.update_embed()
         await interaction.response.edit_message(embed=self.view.embed, view=self.view)
 
+
 # =================================================
 # Entry button
 # =================================================
@@ -596,6 +675,7 @@ class TicketEntryView(discord.ui.View):
         await interaction.response.send_modal(
             StudyGroupModal(interaction.user)
         )
+
 
 # =================================================
 # Setup

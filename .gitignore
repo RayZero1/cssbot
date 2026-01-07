@@ -18,8 +18,7 @@ pyvenv.cfg
 # =========================
 # Runtime data
 # =========================
-data/tickets.json
-data/state.json
+data/
 logs/
 
 # =========================
